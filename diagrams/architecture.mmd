@@ -1,30 +1,52 @@
 flowchart TD
-    %% Music Recommender Simulation - system architecture
+    %% Music Recommender with RAG - system architecture
 
-    CSV[("data/songs.csv<br/>song catalog")]
-    CLI["src/main.py<br/>CLI runner<br/>(mode from argv)"]
-    Profiles["User profiles<br/>(genre, mood, energy,<br/>optional advanced prefs)"]
+    %% ---------- Input ----------
+    User(["👤 User<br/>plain-English request<br/>e.g. 'chill music for studying, no vocals'"])
 
-    subgraph REC["src/recommender.py"]
-        Load["load_songs()<br/>parse CSV, cast numeric fields"]
-        Modes{{"SCORING_MODES<br/>genre_first | mood_first | energy_focused"}}
-        Score["score_song()<br/>weighted matches + bonuses<br/>returns (score, reasons)"]
-        Rank["recommend_songs()<br/>top-k with diversity penalties<br/>(repeat artist / genre)"]
-        OOP["Recommender class<br/>Song / UserProfile dataclasses"]
+    %% ---------- Process ----------
+    subgraph APP["Music Recommender App"]
+        CLI["CLI runner<br/>src/main.py"]
+        Parser["Preference Parser — Gemini<br/>request → structured prefs<br/>genre, mood, energy, ..."]
+        KB[("Knowledge base<br/>data/songs.csv")]
+        Retriever["Retriever<br/>score_song + recommend_songs<br/>top-k candidates with scores & reasons"]
+        Generator["Recommendation Generator — Gemini<br/>writes answer using ONLY<br/>the retrieved songs"]
+        Guard{"Guardrail check<br/>every song in answer<br/>was retrieved?"}
+        Fallback["Rule-based fallback<br/>used if no API key<br/>or API error"]
+        Log[/"Logger<br/>logs/app.log"/]
     end
 
-    Output["ASCII table<br/>rank, title, artist, score, reasons"]
-    Tests["tests/test_recommender.py<br/>pytest"]
+    %% ---------- Output ----------
+    Output(["📋 Output<br/>ranked songs + explanations"])
 
-    CSV --> Load
-    CLI --> Load
-    CLI --> Profiles
-    Load -->|list of song dicts| Rank
-    Profiles --> Rank
-    Modes --> Score
-    Rank -->|each song| Score
-    Score -->|score + reasons| Rank
-    Rank -->|top-k results| CLI
-    CLI --> Output
-    OOP --> Score
-    Tests --> OOP
+    %% ---------- Checking AI results ----------
+    Tests["🧪 Automated tests — pytest<br/>retriever scoring, guardrail,<br/>mocked Gemini responses"]
+    Eval["📊 Evaluation script<br/>src/evaluate.py<br/>9 predefined requests → pass/fail score"]
+    Human["👤 Human review<br/>user reads output,<br/>developer reviews logs"]
+
+    %% Data flow
+    User --> CLI
+    CLI --> Parser
+    Parser -->|structured prefs| Retriever
+    KB --> Retriever
+    Retriever -->|retrieved songs| Generator
+    Generator --> Guard
+    Guard -->|pass| Output
+    Guard -->|"fail: drop unretrieved songs"| Output
+    Parser -. API error .-> Fallback
+    Generator -. API error .-> Fallback
+    Fallback --> Output
+
+    %% Logging
+    Parser -.-> Log
+    Retriever -.-> Log
+    Guard -.-> Log
+    Fallback -.-> Log
+
+    %% Where AI results are checked
+    Tests -. verifies .-> Retriever
+    Tests -. verifies .-> Guard
+    Eval -. runs end-to-end .-> CLI
+    Output -. scored by .-> Eval
+    Output --> Human
+    Log --> Human
