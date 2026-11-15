@@ -1,0 +1,175 @@
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass, asdict
+import csv
+
+# Scoring modes (Strategy pattern): each mode is a different set of weights
+# for the three main features. Pick one by name when scoring.
+SCORING_MODES = {
+    "genre_first": {"genre": 2.0, "mood": 1.0, "energy": 1.0},
+    "mood_first": {"genre": 1.0, "mood": 2.0, "energy": 1.0},
+    "energy_focused": {"genre": 0.5, "mood": 0.5, "energy": 3.0},
+}
+DEFAULT_MODE = "genre_first"
+
+# Bonus weights for the extra features (same in every mode)
+ACOUSTIC_BONUS = 0.5
+POPULARITY_WEIGHT = 0.5
+DECADE_BONUS = 0.5
+MOOD_TAG_BONUS = 0.3
+INSTRUMENTAL_BONUS = 0.5
+LIVE_BONUS = 0.3
+
+# Diversity penalties: subtracted when an artist or genre is already in the top list
+ARTIST_PENALTY = 1.0
+GENRE_PENALTY = 0.5
+
+@dataclass
+class Song:
+    """
+    Represents a song and its attributes.
+    Required by tests/test_recommender.py
+    """
+    id: int
+    title: str
+    artist: str
+    genre: str
+    mood: str
+    energy: float
+    tempo_bpm: float
+    valence: float
+    danceability: float
+    acousticness: float
+
+@dataclass
+class UserProfile:
+    """
+    Represents a user's taste preferences.
+    Required by tests/test_recommender.py
+    """
+    favorite_genre: str
+    favorite_mood: str
+    target_energy: float
+    likes_acoustic: bool
+
+class Recommender:
+    """
+    OOP implementation of the recommendation logic.
+    Required by tests/test_recommender.py
+    """
+    def __init__(self, songs: List[Song]):
+        self.songs = songs
+
+    def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
+        """Return the top k Song objects for this user, best first."""
+        prefs = _profile_to_prefs(user)
+        return sorted(self.songs, key=lambda s: score_song(prefs, asdict(s))[0], reverse=True)[:k]
+
+    def explain_recommendation(self, user: UserProfile, song: Song) -> str:
+        """Return a short sentence listing why this song was scored the way it was."""
+        _, reasons = score_song(_profile_to_prefs(user), asdict(song))
+        return ", ".join(reasons)
+
+def _profile_to_prefs(user: UserProfile) -> Dict:
+    """Convert a UserProfile into the user_prefs dict used by score_song."""
+    return {
+        "genre": user.favorite_genre,
+        "mood": user.favorite_mood,
+        "energy": user.target_energy,
+        "likes_acoustic": user.likes_acoustic,
+    }
+
+def load_songs(csv_path: str) -> List[Dict]:
+    """Read songs.csv into a list of dicts with numeric columns converted to numbers."""
+    int_fields = {"id", "popularity", "release_decade"}
+    float_fields = {"energy", "tempo_bpm", "valence", "danceability", "acousticness",
+                    "instrumentalness", "liveness"}
+    songs = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            for key in int_fields:
+                row[key] = int(row[key])
+            for key in float_fields:
+                row[key] = float(row[key])
+            row["mood_tags"] = row["mood_tags"].split(";")
+            songs.append(row)
+    return songs
+
+def score_song(user_prefs: Dict, song: Dict, mode: str = DEFAULT_MODE) -> Tuple[float, List[str]]:
+    """Score one song against the user's preferences using the chosen mode and return (score, reasons)."""
+    weights = SCORING_MODES[mode]
+    score = 0.0
+    reasons = []
+
+    if song["genre"] == user_prefs.get("genre"):
+        score += weights["genre"]
+        reasons.append(f"genre match (+{weights['genre']:.1f})")
+
+    if song["mood"] == user_prefs.get("mood"):
+        score += weights["mood"]
+        reasons.append(f"mood match (+{weights['mood']:.1f})")
+
+    if "energy" in user_prefs:
+        energy_points = weights["energy"] * (1 - abs(song["energy"] - user_prefs["energy"]))
+        score += energy_points
+        reasons.append(f"energy closeness (+{energy_points:.2f})")
+
+    if user_prefs.get("likes_acoustic") and song["acousticness"] > 0.6:
+        score += ACOUSTIC_BONUS
+        reasons.append(f"acoustic sound (+{ACOUSTIC_BONUS:.1f})")
+
+    # Advanced features (only used if the song and user both have them)
+    if "popularity" in user_prefs and "popularity" in song:
+        pop_points = POPULARITY_WEIGHT * (1 - abs(song["popularity"] - user_prefs["popularity"]) / 100)
+        score += pop_points
+        reasons.append(f"popularity closeness (+{pop_points:.2f})")
+
+    if "decade" in user_prefs and song.get("release_decade") == user_prefs["decade"]:
+        score += DECADE_BONUS
+        reasons.append(f"{song['release_decade']}s match (+{DECADE_BONUS:.1f})")
+
+    for tag in user_prefs.get("mood_tags", []):
+        if tag in song.get("mood_tags", []):
+            score += MOOD_TAG_BONUS
+            reasons.append(f"'{tag}' tag (+{MOOD_TAG_BONUS:.1f})")
+
+    if user_prefs.get("likes_instrumental") and song.get("instrumentalness", 0) > 0.6:
+        score += INSTRUMENTAL_BONUS
+        reasons.append(f"instrumental (+{INSTRUMENTAL_BONUS:.1f})")
+
+    if user_prefs.get("likes_live") and song.get("liveness", 0) > 0.5:
+        score += LIVE_BONUS
+        reasons.append(f"live feel (+{LIVE_BONUS:.1f})")
+
+    return score, reasons
+
+def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5,
+                    mode: str = DEFAULT_MODE, diverse: bool = True) -> List[Tuple[Dict, float, str]]:
+    """Score every song with the chosen mode and return the top k, penalizing repeat artists and genres if diverse."""
+    remaining = []
+    for song in songs:
+        score, reasons = score_song(user_prefs, song, mode)
+        remaining.append((song, score, reasons))
+
+    if not diverse:
+        ranked = sorted(remaining, key=lambda item: item[1], reverse=True)[:k]
+        return [(song, score, ", ".join(reasons)) for song, score, reasons in ranked]
+
+    # Pick one song at a time, re-checking penalties against what's already picked
+    picked = []
+    while remaining and len(picked) < k:
+        best = None
+        for item in remaining:
+            song, score, reasons = item
+            penalty_reasons = []
+            if any(p[0]["artist"] == song["artist"] for p in picked):
+                score -= ARTIST_PENALTY
+                penalty_reasons.append(f"repeat artist (-{ARTIST_PENALTY:.1f})")
+            if any(p[0]["genre"] == song["genre"] for p in picked):
+                score -= GENRE_PENALTY
+                penalty_reasons.append(f"repeat genre (-{GENRE_PENALTY:.1f})")
+            if best is None or score > best[1]:
+                best = (song, score, reasons + penalty_reasons, item)
+        song, score, reasons, item = best
+        picked.append((song, score, ", ".join(reasons)))
+        remaining.remove(item)
+    return picked

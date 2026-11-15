@@ -1,0 +1,30 @@
+flowchart TD
+    %% Music Recommender Simulation - system architecture
+
+    CSV[("data/songs.csv<br/>song catalog")]
+    CLI["src/main.py<br/>CLI runner<br/>(mode from argv)"]
+    Profiles["User profiles<br/>(genre, mood, energy,<br/>optional advanced prefs)"]
+
+    subgraph REC["src/recommender.py"]
+        Load["load_songs()<br/>parse CSV, cast numeric fields"]
+        Modes{{"SCORING_MODES<br/>genre_first | mood_first | energy_focused"}}
+        Score["score_song()<br/>weighted matches + bonuses<br/>returns (score, reasons)"]
+        Rank["recommend_songs()<br/>top-k with diversity penalties<br/>(repeat artist / genre)"]
+        OOP["Recommender class<br/>Song / UserProfile dataclasses"]
+    end
+
+    Output["ASCII table<br/>rank, title, artist, score, reasons"]
+    Tests["tests/test_recommender.py<br/>pytest"]
+
+    CSV --> Load
+    CLI --> Load
+    CLI --> Profiles
+    Load -->|list of song dicts| Rank
+    Profiles --> Rank
+    Modes --> Score
+    Rank -->|each song| Score
+    Score -->|score + reasons| Rank
+    Rank -->|top-k results| CLI
+    CLI --> Output
+    OOP --> Score
+    Tests --> OOP
