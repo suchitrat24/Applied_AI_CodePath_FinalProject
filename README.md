@@ -1,6 +1,6 @@
 # Music Recommender with RAG
 
-## Where this started: Music Recommender Simulation (Modules 1-3)
+## Music Recommender Simulation (Modules 1-3)
 
 My original project was the **Music Recommender Simulation**. It loaded a small catalog of songs from a CSV file and scored each one against a hard-coded user profile (favorite genre, mood, target energy, and a few extras like acoustic or instrumental). It returned the top 5 songs with a reason for each score. It had three scoring modes (`genre_first`, `mood_first`, `energy_focused`) and a diversity penalty so the same artist or genre didn't fill the whole list. The catch was that you had to write the profile as a Python dictionary, so you couldn't just ask it for music.
 
