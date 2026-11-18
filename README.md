@@ -67,6 +67,11 @@ You need Python 3.10 or newer.
    python -m src.main "80s synthwave" --mode mood_first
    python -m src.main --demo                  # the original Module 1-3 profile demo
    ```
+   **Or run it in your browser:**
+   ```bash
+   streamlit run src/app.py
+   ```
+   This opens `http://localhost:8501`, where you can type a request, choose the scoring mode, and see the picks with their reasons and how the request was interpreted. Set `GEMINI_API_KEY` in the same terminal first to use Gemini.
 7. **Run the tests and the evaluation:**
    ```bash
    python -m pytest                    # unit tests, offline
